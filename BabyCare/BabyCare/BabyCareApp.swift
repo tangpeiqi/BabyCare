@@ -1,6 +1,6 @@
 //
-//  PoLApp.swift
-//  PoL
+//  BabyCareApp.swift
+//  BabyCare
 //
 //  Created by Peiqi Tang on 2/12/26.
 //
@@ -10,7 +10,7 @@ import SwiftData
 import UIKit
 
 @main
-struct PoLApp: App {
+struct BabyCareApp: App {
     @StateObject private var wearablesManager = WearablesManager()
 
     init() {

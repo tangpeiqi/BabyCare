@@ -25,7 +25,7 @@
 			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>polmeta</string>
+				<string>babycaremeta</string>
 			</array>
 		</dict>
 	</array>
@@ -42,7 +42,7 @@
 	<key>MWDAT</key>
 	<dict>
 		<key>AppLinkURLScheme</key>
-		<string>polmeta://</string>
+		<string>babycaremeta://</string>
 		<key>ClientToken</key>
 		<string>AR|931350532905258|d10c340806543043f08c31fddd95bfea</string>
 		<key>MetaAppID</key>

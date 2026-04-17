@@ -94,7 +94,7 @@ final class WearablesManager: ObservableObject {
     }
 
     func handleIncomingURL(_ url: URL) {
-        guard url.scheme == "polmeta" else { return }
+        guard url.scheme == "babycaremeta" else { return }
         guard isWearablesActionURL(url) else { return }
         recordDebugEvent(
             "incoming_url",
