@@ -3,6 +3,14 @@
 > Full API reference: https://wearables.developer.meta.com/llms.txt?full=true
 > Developer docs: https://wearables.developer.meta.com/docs/develop/
 
+## Project-Specific Skills
+
+- Use `$gemini-request-logic-sync` at `/Users/peiqitang/.codex/skills/gemini-request-logic-sync/SKILL.md` whenever a change affects the BabyCare Gemini pipeline or request logic.
+- Treat `/Users/peiqitang/Documents/GitHub/BabyCare/BabyCare/GEMINI_REQUEST_LOGIC.md` as required companion documentation for Gemini pipeline changes.
+- In the same turn as any Gemini logic change, review `GEMINI_REQUEST_LOGIC.md` against the implementation and update it if needed.
+- Do not consider Gemini pipeline work complete until `GEMINI_REQUEST_LOGIC.md` has either been updated or explicitly checked and confirmed to already match the implementation.
+- Mention the doc-sync outcome in the final response whenever Gemini pipeline logic was touched.
+
 ## Code style
 
 
@@ -988,4 +996,3 @@ Your DAT app should only depend on:
 - [CameraAccess sample](https://github.com/facebook/meta-wearables-dat-ios/tree/main/samples)
 - [Full integration guide](https://wearables.developer.meta.com/docs/build-integration-ios)
 - [Developer documentation](https://wearables.developer.meta.com/docs/develop/)
-

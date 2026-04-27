@@ -3,6 +3,11 @@ import Foundation
 
 @MainActor
 final class AudioSegmentRecorder {
+    private enum AudioThreshold {
+        static let emptyWaveHeaderBytes = 44
+        static let minimumMeaningfulPayloadBytes = 3_200
+    }
+
     private let baseDirectoryURL: URL
     private var activeSegmentID: UUID?
     private var activeAudioURL: URL?
@@ -74,8 +79,10 @@ final class AudioSegmentRecorder {
             return .missing(status: "not_recording", note: "Audio recorder was not initialized.")
         }
 
+        let currentTimeSeconds = recorder.currentTime
         recorder.stop()
-        let durationMs = Int((recorder.currentTime * 1000.0).rounded())
+        let route = AVAudioSession.sharedInstance().currentRoute.inputs.first?.portType.rawValue ?? "unknown"
+        let durationMsFromRecorder = Int((currentTimeSeconds * 1000.0).rounded())
 
         activeSegmentID = nil
         activeAudioURL = nil
@@ -83,21 +90,35 @@ final class AudioSegmentRecorder {
 
         let fileAttributes = try? FileManager.default.attributesOfItem(atPath: audioURL.path)
         let bytes = (fileAttributes?[.size] as? NSNumber)?.intValue ?? 0
+        let payloadBytes = max(0, bytes - AudioThreshold.emptyWaveHeaderBytes)
+        let estimatedDurationMsFromBytes = Int(
+            (Double(payloadBytes) / Double(8_000 * 1 * 2) * 1000.0).rounded()
+        )
+        let normalizedDurationMs = max(durationMsFromRecorder, estimatedDurationMsFromBytes)
 
-        if bytes <= 44 {
+        if bytes <= AudioThreshold.emptyWaveHeaderBytes || payloadBytes < AudioThreshold.minimumMeaningfulPayloadBytes {
             try? FileManager.default.removeItem(at: audioURL)
-            return .missing(status: "empty_audio", note: "Audio file is empty or contains no usable samples.")
+            return .missing(
+                status: "empty_audio",
+                note: "Audio file contained too little recorded payload. route=\(route)",
+                durationMillis: normalizedDurationMs,
+                bytes: bytes,
+                sampleRateHz: 8_000,
+                channels: 1
+            )
         }
 
         return SegmentAudioMetadata(
             included: true,
             status: "recorded",
-            note: "Audio captured successfully.",
+            note: "Audio captured successfully. route=\(route)",
             localFileName: "audio.wav",
+            localFileURL: audioURL,
             sampleRateHz: 8000,
             channels: 1,
-            durationMillis: max(durationMs, 0),
-            bytes: bytes
+            durationMillis: normalizedDurationMs,
+            bytes: bytes,
+            transcript: nil
         )
     }
 

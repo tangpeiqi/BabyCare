@@ -54,6 +54,8 @@
 	<string>Needed to connect to Meta Wearables</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Needed to capture optional voice notes during activity segments.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Needed to transcribe optional voice notes during activity segments.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

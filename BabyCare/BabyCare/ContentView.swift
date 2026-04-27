@@ -35,6 +35,15 @@ private extension Text {
     }
 }
 
+private extension Color {
+    init(rgbHex: Int) {
+        let red = Double((rgbHex >> 16) & 0xFF) / 255
+        let green = Double((rgbHex >> 8) & 0xFF) / 255
+        let blue = Double(rgbHex & 0xFF) / 255
+        self.init(red: red, green: green, blue: blue)
+    }
+}
+
 struct ContentView: View {
     private let bottomNavigationReservedHeight: CGFloat = 144
 
@@ -61,11 +70,19 @@ struct ContentView: View {
         var id: Self { self }
     }
 
+    private struct TabBackgroundPalette {
+        let firstCircle: Color
+        let secondCircle: Color
+    }
+
     @EnvironmentObject private var wearablesManager: WearablesManager
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \ActivityEventRecord.timestamp, order: .reverse) private var timelineEvents: [ActivityEventRecord]
     @State private var selectedTab: AppTab = .summary
+    @State private var backgroundTab: AppTab = .summary
+    @State private var outgoingBackgroundTab: AppTab?
+    @State private var backgroundTransitionProgress: Double = 1
     @State private var eventPendingEdit: ActivityEventRecord?
     @State private var eventPendingDelete: ActivityEventRecord?
     @State private var eventPendingValueEdit: ActivityValueEditor?
@@ -271,82 +288,62 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Group {
-                switch selectedTab {
-                case .summary:
-                    NavigationStack {
-                        Form {
-                            Section {
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                sharedTabBackground
+
+                Group {
+                    switch selectedTab {
+                    case .summary:
+                        ScrollView {
+                            VStack(spacing: 0) {
                                 widgetRow {
                                     VStack(spacing: 24) {
                                         summaryLastActivitiesCard
                                         summaryActivityGraphCard
                                     }
                                 }
-                                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                                .listRowBackground(Color.clear)
+                                .padding(.top, 12)
                             }
+                            .padding(.horizontal, 16)
                         }
-                        .safeAreaInset(edge: .top) {
-                            Color.clear.frame(height: 8)
-                        }
-                        .safeAreaInset(edge: .bottom) {
-                            Color.clear.frame(height: bottomNavigationReservedHeight)
-                        }
-                        .scrollIndicators(.hidden)
-                        .scrollContentBackground(.hidden)
-                        .background(summaryBackground)
-                        .navigationTitle("Summary")
-                    }
-                case .activities:
-                    NavigationStack {
-                Form {
-                    let visibleEvents = timelineEvents.filter { !$0.isDeleted }
-                    if visibleEvents.isEmpty {
-                        Section {
-                            Text("No activity events yet. End a segment to create one.")
-                                .appText(.body)
-                                .foregroundStyle(.secondary)
-                                }
-                            } else {
-                                let calendar = Calendar.current
-                                let groupedEvents = Dictionary(grouping: visibleEvents) {
-                                    calendar.startOfDay(for: $0.timestamp)
-                                }
-                                let sortedDays = groupedEvents.keys.sorted(by: >)
-                                Section {
+                    case .activities:
+                        ScrollView {
+                            let visibleEvents = timelineEvents.filter { !$0.isDeleted }
+
+                            VStack(spacing: 0) {
+                                if visibleEvents.isEmpty {
+                                    Text("No activity events yet. End a segment to create one.")
+                                        .appText(.body)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.top, 12)
+                                } else {
+                                    let calendar = Calendar.current
+                                    let groupedEvents = Dictionary(grouping: visibleEvents) {
+                                        calendar.startOfDay(for: $0.timestamp)
+                                    }
+                                    let sortedDays = groupedEvents.keys.sorted(by: >)
+
                                     activityTimelineContainer(sortedDays: sortedDays, groupedEvents: groupedEvents)
-                                        .listRowInsets(EdgeInsets())
-                                        .listRowBackground(Color.clear)
+                                        .padding(.top, 12)
                                 }
                             }
+                            .padding(.horizontal, 16)
                         }
-                        .safeAreaInset(edge: .top) {
-                            Color.clear.frame(height: 8)
-                        }
-                        .safeAreaInset(edge: .bottom) {
-                            Color.clear.frame(height: bottomNavigationReservedHeight)
-                        }
-                        .scrollIndicators(.hidden)
-                        .scrollContentBackground(.hidden)
-                        .background(activitiesBackground)
-                        .navigationTitle("Activities")
-                    }
-                case .settings:
-                    NavigationStack {
-                        Form {
-                            if !wearablesManager.isDeviceRegistered {
-                                Section {
+                    case .settings:
+                        ScrollView {
+                            VStack(spacing: 24) {
+                                if !wearablesManager.isDeviceRegistered {
                                     widgetRow {
                                         registrationButton(isRegistered: false)
                                     }
-                                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                                        .listRowBackground(Color.clear)
+                                    .padding(.top, 12)
+                                } else {
+                                    Color.clear
+                                        .frame(height: 12)
                                 }
-                            }
 
-                            Section {
                                 widgetRow {
                                     VStack(spacing: 24) {
                                         widgetCard {
@@ -386,53 +383,51 @@ struct ContentView: View {
                                         }
                                     }
                                 }
-                                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                                .listRowBackground(Color.clear)
-                            }
 
-                            if wearablesManager.isDeviceRegistered {
-                                Section {
+                                if wearablesManager.isDeviceRegistered {
                                     widgetRow {
                                         registrationButton(isRegistered: true)
                                     }
-                                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                                        .listRowBackground(Color.clear)
                                 }
                             }
-                        }
-                        .safeAreaInset(edge: .top) {
-                            Color.clear.frame(height: 8)
-                        }
-                        .safeAreaInset(edge: .bottom) {
-                            Color.clear.frame(height: bottomNavigationReservedHeight)
-                        }
-                        .scrollIndicators(.hidden)
-                        .listSectionSpacing(.compact)
-                        .scrollContentBackground(.hidden)
-                        .background(settingsBackground)
-                        .navigationTitle("Settings")
-                        .navigationDestination(item: $settingsDestination) { destination in
-                            switch destination {
-                            case .debugLogs:
-                                DebugLogsView()
-                            case .livePreview:
-                                LivePreviewView()
-                            }
+                            .padding(.horizontal, 16)
                         }
                     }
                 }
-            }
-            ZStack(alignment: .bottom) {
-                bottomScrollFadeOverlay
-                    .allowsHitTesting(false)
+                .safeAreaInset(edge: .bottom) {
+                    Color.clear.frame(height: bottomNavigationReservedHeight)
+                }
+                .scrollIndicators(.hidden)
+                .background(Color.clear)
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
 
-                bottomNavigationWidget
-                    .padding(.horizontal, 21)
-                    .padding(.top, 8)
-                    .padding(.bottom, 21)
+                ZStack(alignment: .bottom) {
+                    bottomScrollFadeOverlay
+                        .allowsHitTesting(false)
+
+                    bottomNavigationWidget
+                        .padding(.horizontal, 21)
+                        .padding(.top, 8)
+                        .padding(.bottom, 21)
+                }
+                .ignoresSafeArea(edges: .bottom)
             }
-            .ignoresSafeArea(edges: .bottom)
+            .background(Color.clear)
+            .navigationTitle(selectedTabTitle)
+            .navigationDestination(item: $settingsDestination) { destination in
+                switch destination {
+                case .debugLogs:
+                    DebugLogsView()
+                case .livePreview:
+                    LivePreviewView()
+                }
+            }
         }
+        .background(Color.clear)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .background(Color.clear)
         .onChange(of: selectedTab) { _, _ in
             if selectedTab != .activities {
                 activeTimelineSwipeEventID = nil
@@ -474,6 +469,14 @@ struct ContentView: View {
 
                     Section("Time Logged") {
                         DatePicker(
+                            "Logged Date",
+                            selection: $timeDraft,
+                            displayedComponents: .date
+                        )
+                        .datePickerStyle(.graphical)
+                        .labelsHidden()
+
+                        DatePicker(
                             "",
                             selection: $timeDraft,
                             displayedComponents: .hourAndMinute
@@ -482,7 +485,7 @@ struct ContentView: View {
                         .labelsHidden()
                     }
                 }
-                .navigationTitle("Edit Activity Type")
+                .navigationTitle("Edit Activity")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -952,19 +955,19 @@ struct ContentView: View {
         return ZStack(alignment: .topLeading) {
             if isFeedingGraphEnabled {
                 ForEach(feedingEvents, id: \.id) { event in
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: 2)
                         .fill(Color(red: 0.52, green: 0.18, blue: 0.56))
-                        .frame(width: width, height: 8)
-                        .offset(x: 0, y: yPosition(for: event.timestamp, in: visualWindow.start, chartHeight: height) - 4)
+                        .frame(width: width, height: 4)
+                        .offset(x: 0, y: yPosition(for: event.timestamp, in: visualWindow.start, chartHeight: height) - 2)
                 }
             }
 
             if isDiaperGraphEnabled {
                 ForEach(diaperEvents, id: \.id) { event in
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: 2)
                         .fill(Color(red: 0.53, green: 0.46, blue: 0.03))
-                        .frame(width: width, height: 8)
-                        .offset(x: 0, y: yPosition(for: event.timestamp, in: visualWindow.start, chartHeight: height) - 4)
+                        .frame(width: width, height: 4)
+                        .offset(x: 0, y: yPosition(for: event.timestamp, in: visualWindow.start, chartHeight: height) - 2)
                 }
             }
 
@@ -1366,7 +1369,7 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 Rectangle()
                     .fill(accentColor)
-                    .frame(width: 2, height: 20)
+                    .frame(width: 4, height: 20)
 
                 HStack(alignment: .center, spacing: 12) {
                     Button {
@@ -1608,18 +1611,18 @@ struct ContentView: View {
         applyActivityTypeChanges(for: event, to: activityTypeDraft)
 
         let calendar = Calendar.current
-        let components = calendar.dateComponents([.hour, .minute], from: timeDraft)
-        if let hour = components.hour,
-           let minute = components.minute,
-           let updated = calendar.date(
-            bySettingHour: hour,
-            minute: minute,
-            second: 0,
-            of: event.timestamp
-           ) {
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: timeDraft)
+        if let updated = calendar.date(from: DateComponents(
+            year: components.year,
+            month: components.month,
+            day: components.day,
+            hour: components.hour,
+            minute: components.minute,
+            second: 0
+        )) {
             event.timestamp = updated
         } else {
-            timelineActionError = "Failed to update time."
+            timelineActionError = "Failed to update date and time."
             return
         }
 
@@ -1667,55 +1670,116 @@ struct ContentView: View {
         }
     }
 
-    private var settingsBackground: some View {
-        tabBackgroundImage(named: "Settings Background")
-    }
+    private var sharedTabBackground: some View {
+        GeometryReader { proxy in
+            let size = proxy.size
 
-    private var summaryBackground: some View {
-        tabBackgroundImage(named: "Summary Background")
-    }
+            ZStack {
+                Color.white
 
-    private var activitiesBackground: some View {
-        tabBackgroundImage(named: "Activities Background")
-    }
-
-    private func tabBackgroundImage(named name: String) -> some View {
-        ZStack(alignment: .top) {
-            Color.clear
-
-            Group {
-                if let image = bundledBackgroundImage(named: name) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    Image(name)
-                        .resizable()
-                        .scaledToFill()
+                if let outgoingBackgroundTab {
+                    backgroundCirclesLayer(
+                        for: palette(for: outgoingBackgroundTab),
+                        size: size
+                    )
+                    .opacity(1 - backgroundTransitionProgress)
                 }
+
+                backgroundCirclesLayer(
+                    for: palette(for: backgroundTab),
+                    size: size
+                )
+                .opacity(backgroundTransitionProgress)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 110, alignment: .top)
-            .clipped()
+            .frame(width: size.width, height: size.height)
         }
         .ignoresSafeArea()
     }
 
-    private func bundledBackgroundImage(named name: String) -> UIImage? {
-        let directPath = Bundle.main.path(forResource: name, ofType: "png", inDirectory: "Background")
-        let rootPath = Bundle.main.path(forResource: name, ofType: "png")
-        let discoveredPath = Bundle.main.urls(forResourcesWithExtension: "png", subdirectory: nil)?
-            .first(where: { $0.deletingPathExtension().lastPathComponent == name })?
-            .path
+    private func backgroundCirclesLayer(
+        for palette: TabBackgroundPalette,
+        size: CGSize
+    ) -> some View {
+        Canvas { context, _ in
+            let diameter: CGFloat = 380
+            let blurRadius: CGFloat = 100
 
-        guard let imagePath = directPath ?? rootPath ?? discoveredPath,
-              let image = UIImage(contentsOfFile: imagePath),
-              let cgImage = image.cgImage else {
-            return nil
+            context.drawLayer { layer in
+                layer.addFilter(.blur(radius: blurRadius))
+
+                let secondCircleRect = CGRect(
+                    x: size.width - 40 - (diameter / 2),
+                    y: 20 - (diameter / 2),
+                    width: diameter,
+                    height: diameter
+                )
+                layer.fill(
+                    Path(ellipseIn: secondCircleRect),
+                    with: .color(palette.secondCircle)
+                )
+
+                let firstCircleRect = CGRect(
+                    x: 70 - (diameter / 2),
+                    y: 40 - (diameter / 2),
+                    width: diameter,
+                    height: diameter
+                )
+                layer.fill(
+                    Path(ellipseIn: firstCircleRect),
+                    with: .color(palette.firstCircle)
+                )
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func palette(for tab: AppTab) -> TabBackgroundPalette {
+        switch tab {
+        case .summary:
+            return TabBackgroundPalette(
+                firstCircle: Color(rgbHex: 0xFFE2DE),
+                secondCircle: Color(rgbHex: 0xFFEDDE)
+            )
+        case .activities:
+            return TabBackgroundPalette(
+                firstCircle: Color(rgbHex: 0xFCE0D0),
+                secondCircle: Color(rgbHex: 0xFFE5F1)
+            )
+        case .settings:
+            return TabBackgroundPalette(
+                firstCircle: Color(rgbHex: 0xFFEDDE),
+                secondCircle: Color(rgbHex: 0xFCE0D0)
+            )
+        }
+    }
+
+    private func startBackgroundTransition(to tab: AppTab) {
+        guard backgroundTab != tab else { return }
+
+        outgoingBackgroundTab = backgroundTab
+        backgroundTab = tab
+        backgroundTransitionProgress = 0
+
+        withAnimation(.easeInOut(duration: 1.0)) {
+            backgroundTransitionProgress = 1
         }
 
-        // Background PNGs are exported from Figma at 4x, so treat them as @4x assets.
-        return UIImage(cgImage: cgImage, scale: 4.0, orientation: image.imageOrientation)
+        let targetTab = tab
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard backgroundTab == targetTab else { return }
+            outgoingBackgroundTab = nil
+        }
+    }
+
+    private var selectedTabTitle: String {
+        switch selectedTab {
+        case .summary:
+            return "Summary"
+        case .activities:
+            return "Activities"
+        case .settings:
+            return "Settings"
+        }
     }
 
     private var streamLayoutState: CameraStreamLayoutState {
@@ -1959,9 +2023,8 @@ struct ContentView: View {
         let isSelected = selectedTab == tab
         let accentColor = bottomTabAccentColor(for: tab)
         return Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                selectedTab = tab
-            }
+            selectedTab = tab
+            startBackgroundTransition(to: tab)
         } label: {
             ZStack {
                 if isSelected {

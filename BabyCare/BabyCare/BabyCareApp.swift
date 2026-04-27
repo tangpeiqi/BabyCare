@@ -18,6 +18,14 @@ struct BabyCareApp: App {
         tabBarAppearance.itemPositioning = .fill
         tabBarAppearance.itemWidth = 0
         tabBarAppearance.itemSpacing = 0
+
+        // SwiftUI Form can still be backed by opaque UIKit views.
+        // Clear those container backgrounds so the shared animated tab background shows through.
+        UITableView.appearance().backgroundColor = .clear
+        UITableViewCell.appearance().backgroundColor = .clear
+        UITableViewHeaderFooterView.appearance().tintColor = .clear
+        UICollectionView.appearance().backgroundColor = .clear
+        UICollectionViewCell.appearance().backgroundColor = .clear
     }
 
     var body: some Scene {

@@ -25,21 +25,47 @@ struct SegmentAudioMetadata: Sendable {
     let status: String
     let note: String
     let localFileName: String?
+    let localFileURL: URL?
     let sampleRateHz: Int?
     let channels: Int?
     let durationMillis: Int?
     let bytes: Int?
+    let transcript: String?
 
-    static func missing(status: String, note: String) -> SegmentAudioMetadata {
+    static func missing(
+        status: String,
+        note: String,
+        durationMillis: Int? = nil,
+        bytes: Int? = nil,
+        sampleRateHz: Int? = nil,
+        channels: Int? = nil
+    ) -> SegmentAudioMetadata {
         SegmentAudioMetadata(
             included: false,
             status: status,
             note: note,
             localFileName: nil,
-            sampleRateHz: nil,
-            channels: nil,
-            durationMillis: nil,
-            bytes: nil
+            localFileURL: nil,
+            sampleRateHz: sampleRateHz,
+            channels: channels,
+            durationMillis: durationMillis,
+            bytes: bytes,
+            transcript: nil
+        )
+    }
+
+    func withTranscript(_ transcript: String?) -> SegmentAudioMetadata {
+        SegmentAudioMetadata(
+            included: included,
+            status: status,
+            note: note,
+            localFileName: localFileName,
+            localFileURL: localFileURL,
+            sampleRateHz: sampleRateHz,
+            channels: channels,
+            durationMillis: durationMillis,
+            bytes: bytes,
+            transcript: transcript
         )
     }
 }
@@ -64,6 +90,7 @@ actor LocalVideoSegmentRecorder {
             let channels: Int?
             let durationMillis: Int?
             let bytes: Int?
+            let transcript: String?
         }
 
         let segmentId: UUID
@@ -148,7 +175,8 @@ actor LocalVideoSegmentRecorder {
                 sampleRateHz: audioMetadata.sampleRateHz,
                 channels: audioMetadata.channels,
                 durationMillis: audioMetadata.durationMillis,
-                bytes: audioMetadata.bytes
+                bytes: audioMetadata.bytes,
+                transcript: audioMetadata.transcript
             )
         )
         let manifestURL = segment.directoryURL.appendingPathComponent("segment_manifest.json")

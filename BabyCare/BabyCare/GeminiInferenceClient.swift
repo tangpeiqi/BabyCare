@@ -55,8 +55,8 @@ struct GeminiClientConfiguration: Sendable {
         apiKey: String,
         model: String = "gemini-2.0-flash",
         apiBaseURL: String = "https://generativelanguage.googleapis.com/v1beta",
-        maxFramesPerSegment: Int = 8,
-        maxInlineBytesPerPart: Int = 1_500_000,
+        maxFramesPerSegment: Int = 4,
+        maxInlineBytesPerPart: Int = 350_000,
         maxImagePixelDimension: Double = 768
     ) {
         self.apiKey = apiKey
@@ -104,6 +104,12 @@ struct GeminiInferenceAppConfig {
 }
 
 final class GeminiInferenceClient: InferenceClient {
+    private enum SegmentRequestMode: String {
+        case defaultCombined = "combined"
+        case transcriptOnly = "transcript_only"
+        case imageOnly = "image_only"
+    }
+
     private let configuration: GeminiClientConfiguration
     private let session: URLSession
     let modelName: String
@@ -118,14 +124,25 @@ final class GeminiInferenceClient: InferenceClient {
     }
 
     func infer(from capture: CaptureEnvelope) async throws -> InferenceResult {
-        let parts = try buildParts(from: capture)
+        let mode = segmentRequestMode(for: capture)
+        let parts = try buildParts(from: capture, mode: mode)
         let output = try await generate(parts: parts)
-        return output.toInferenceResult(fallbackModelVersion: configuration.model)
+        let inference = output.toInferenceResult(
+            fallbackModelVersion: "\(configuration.model)-\(mode.rawValue)"
+        )
+        return InferenceResult(
+            label: inference.label,
+            confidence: inference.confidence,
+            rationaleShort: inference.rationaleShort,
+            modelVersion: "\(inference.modelVersion)-\(mode.rawValue)",
+            feedingAmountOz: inference.feedingAmountOz,
+            mentionedEventTime: inference.mentionedEventTime
+        )
     }
 
-    private func buildParts(from capture: CaptureEnvelope) throws -> [GeminiPart] {
+    private func buildParts(from capture: CaptureEnvelope, mode: SegmentRequestMode) throws -> [GeminiPart] {
         var parts: [GeminiPart] = [
-            .text(promptText(for: capture))
+            .text(promptText(for: capture, mode: mode))
         ]
 
         switch capture.captureType {
@@ -133,7 +150,7 @@ final class GeminiInferenceClient: InferenceClient {
             let photoData = try Data(contentsOf: capture.localMediaURL)
             parts.append(.inlineData(mimeType: "image/jpeg", data: preparedImageData(photoData)))
         case .shortVideo:
-            parts.append(contentsOf: try buildSegmentParts(manifestURL: capture.localMediaURL))
+            parts.append(contentsOf: try buildSegmentParts(manifestURL: capture.localMediaURL, mode: mode))
         case .audioSnippet:
             let audioData = try Data(contentsOf: capture.localMediaURL)
             parts.append(.inlineData(mimeType: "audio/wav", data: audioData))
@@ -142,7 +159,10 @@ final class GeminiInferenceClient: InferenceClient {
         return parts
     }
 
-    private func buildSegmentParts(manifestURL: URL) throws -> [GeminiPart] {
+    private func buildSegmentParts(
+        manifestURL: URL,
+        mode: SegmentRequestMode
+    ) throws -> [GeminiPart] {
         let manifestData = try Data(contentsOf: manifestURL)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -157,24 +177,26 @@ final class GeminiInferenceClient: InferenceClient {
             )
         )
 
-        let framesDirectory = segmentDirectory.appendingPathComponent(manifest.framesDirectory, isDirectory: true)
-        let frameURLs = try loadFrameURLs(from: framesDirectory)
-        let sampledFrames = sampleEvenly(frameURLs, maxCount: configuration.maxFramesPerSegment)
-        for frameURL in sampledFrames {
-            let frameData = try Data(contentsOf: frameURL)
-            parts.append(.inlineData(mimeType: "image/jpeg", data: preparedImageData(frameData)))
+        if mode != .transcriptOnly {
+            let framesDirectory = segmentDirectory.appendingPathComponent(manifest.framesDirectory, isDirectory: true)
+            let frameURLs = try loadFrameURLs(from: framesDirectory)
+            let sampledFrames = sampleEvenly(frameURLs, maxCount: configuration.maxFramesPerSegment)
+            for frameURL in sampledFrames {
+                let frameData = try Data(contentsOf: frameURL)
+                parts.append(.inlineData(mimeType: "image/jpeg", data: preparedImageData(frameData)))
+            }
         }
 
-        if manifest.audio.included,
+        if mode != .imageOnly,
+           manifest.audio.included,
            manifest.audio.status == "recorded",
-           let fileName = manifest.audio.localFileName {
-            let audioURL = segmentDirectory.appendingPathComponent(fileName)
-            if FileManager.default.fileExists(atPath: audioURL.path) {
-                let audioData = try Data(contentsOf: audioURL)
-                if audioData.count <= configuration.maxInlineBytesPerPart {
-                    parts.append(.inlineData(mimeType: "audio/wav", data: audioData))
-                }
-            }
+           let transcript = manifest.audio.transcript?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !transcript.isEmpty {
+            parts.append(
+                .text(
+                    "Spoken audio transcript for this segment: \(transcript)"
+                )
+            )
         }
 
         if parts.count <= 1 {
@@ -182,6 +204,13 @@ final class GeminiInferenceClient: InferenceClient {
         }
 
         return parts
+    }
+
+    private func segmentRequestMode(for capture: CaptureEnvelope) -> SegmentRequestMode {
+        guard capture.captureType == .shortVideo else {
+            return .defaultCombined
+        }
+        return SegmentRequestMode(rawValue: capture.metadata["inferenceMode"] ?? "") ?? .defaultCombined
     }
 
     private func loadFrameURLs(from directoryURL: URL) throws -> [URL] {
@@ -207,19 +236,29 @@ final class GeminiInferenceClient: InferenceClient {
         }
     }
 
-    private func promptText(for capture: CaptureEnvelope) -> String {
-        """
+    private func promptText(for capture: CaptureEnvelope, mode: SegmentRequestMode) -> String {
+        let evidenceGuidance: String
+        switch mode {
+        case .transcriptOnly:
+            evidenceGuidance = "This request contains transcript text only. Use only the transcript and text context as evidence."
+        case .imageOnly:
+            evidenceGuidance = "This request contains image evidence only. Do not assume any spoken transcript exists."
+        case .defaultCombined:
+            evidenceGuidance = "Use only evidence in the media."
+        }
+
+        return """
         You classify baby-care media into one activity label.
         Allowed labels: diaperWet, diaperBowel, feeding, sleepStart, wakeUp, other.
         If label is feeding and amount in ounces is inferable, provide feedingAmountOz as a number with one decimal.
-        If spoken audio explicitly mentions what time the activity happened, provide mentionedEventTime24h in HH:mm 24-hour format.
-        If spoken audio explicitly mentions a relative date reference for when the activity happened, provide mentionedEventDayOffset as an integer:
+        If spoken audio or an included transcript explicitly mentions what time the activity happened, provide mentionedEventTime24h in HH:mm 24-hour format.
+        If spoken audio or an included transcript explicitly mentions a relative date reference for when the activity happened, provide mentionedEventDayOffset as an integer:
         -1 for yesterday, 0 for today, 1 for tomorrow.
         Only provide mentionedEventDayOffset when the date reference is explicit in the audio or transcription. Do not infer or guess it from context.
         Only provide mentionedEventTime24h when the time is explicitly stated in the audio or transcription. Do not infer or guess it from context.
-        Use only evidence in the media.
+        \(evidenceGuidance)
         Return JSON only following the schema.
-        Capture metadata: type=\(capture.captureType.rawValue), capturedAt=\(capture.capturedAt.ISO8601Format()).
+        Capture metadata: type=\(capture.captureType.rawValue), capturedAt=\(capture.capturedAt.ISO8601Format()), inferenceMode=\(mode.rawValue).
         """
     }
 
@@ -363,6 +402,7 @@ private struct GeminiSegmentManifest: Decodable {
         let included: Bool
         let status: String
         let localFileName: String?
+        let transcript: String?
     }
 
     let startedAt: Date

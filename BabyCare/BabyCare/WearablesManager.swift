@@ -16,8 +16,38 @@ struct WearablesDebugEvent: Identifiable {
     let isManualMarker: Bool
 }
 
+private final class SingleResumeGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hasResumed = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard !hasResumed else {
+            return false
+        }
+        hasResumed = true
+        return true
+    }
+}
+
 @MainActor
 final class WearablesManager: ObservableObject {
+    private enum SegmentInferenceDecision {
+        case send(audioRouteChurnNearEnd: Bool)
+        case skip(reason: String, audioRouteChurnNearEnd: Bool)
+    }
+
+    private enum SegmentInferencePolicy {
+        static let minimumDuration: TimeInterval = 1.5
+        static let minimumFrameCount: Int = 24
+        static let startupShutdownWindow: TimeInterval = 2.0
+        static let audioRouteChurnWindow: TimeInterval = 1.0
+        static let routeChurnBorderlineDuration: TimeInterval = 3.0
+        static let routeChurnBorderlineFrameCount: Int = 48
+    }
+
     @Published private(set) var registrationStateText: String = "unknown"
     @Published private(set) var cameraPermissionText: String = "Not granted"
     @Published private(set) var connectedDeviceCount: Int = 0
@@ -48,6 +78,8 @@ final class WearablesManager: ObservableObject {
     private var activityPipeline: ActivityPipeline?
     private var previousStreamStateNormalized: String?
     private var lastAppInitiatedSessionControlAt: Date?
+    private var lastAudioRouteChangeAt: Date?
+    private var audioRouteChangeObserver: NSObjectProtocol?
     private var lastVideoFrameLogAt: Date?
     private var activeSegmentID: UUID?
     private var activeSegmentStartedAt: Date?
@@ -66,7 +98,14 @@ final class WearablesManager: ObservableObject {
         if autoConfigure {
             configureWearables()
         }
+        observeAudioRouteChanges()
         observeWearablesState()
+    }
+
+    deinit {
+        if let audioRouteChangeObserver {
+            NotificationCenter.default.removeObserver(audioRouteChangeObserver)
+        }
     }
 
     func configurePipelineIfNeeded(modelContext: ModelContext) {
@@ -393,6 +432,23 @@ final class WearablesManager: ObservableObject {
                         "count": "\(connectedDeviceCount)",
                         "devices": deviceList.isEmpty ? "<none>" : deviceList
                     ])
+                )
+            }
+        }
+    }
+
+    private func observeAudioRouteChanges() {
+        audioRouteChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            Task { @MainActor in
+                self.lastAudioRouteChangeAt = Date()
+                self.recordDebugEvent(
+                    "audio_route_changed",
+                    metadata: self.audioRouteChangeMetadata(from: notification)
                 )
             }
         }
@@ -816,7 +872,7 @@ final class WearablesManager: ObservableObject {
 
         Task {
             do {
-                let audioMetadata = finalizeAudioCapture(for: segmentID)
+                let audioMetadata = await finalizeAudioCapture(for: segmentID)
                 guard let persisted = try await segmentRecorder.endSegment(
                     id: segmentID,
                     endedAt: endedAt,
@@ -849,6 +905,7 @@ final class WearablesManager: ObservableObject {
                         "frames": "\(persisted.frameCount)",
                         "audioIncluded": audioMetadata.included ? "true" : "false",
                         "audioStatus": audioMetadata.status,
+                        "transcriptChars": audioMetadata.transcript.map { "\($0.count)" } ?? "0",
                         "elapsedSec": String(format: "%.2f", elapsed),
                         "manifest": persisted.manifestURL.lastPathComponent
                     ]
@@ -859,6 +916,49 @@ final class WearablesManager: ObservableObject {
                     recordDebugEvent("segment_pipeline_skipped", metadata: ["reason": "pipeline_missing"])
                     return
                 }
+
+                let heuristicSnapshot = try pipeline.localTranscriptHeuristicSnapshot(
+                    manifestURL: persisted.manifestURL,
+                    recordingDate: persisted.endedAt
+                )
+                let gateSnapshot = await pipeline.requestGateSnapshot()
+                let gateTimingMetadata = requestTimingMetadata(from: gateSnapshot)
+                let heuristicMetadata = localHeuristicMetadata(from: heuristicSnapshot)
+
+                let inferenceDecision = segmentInferenceDecision(
+                    frameCount: persisted.frameCount,
+                    duration: elapsed,
+                    endedAt: persisted.endedAt
+                )
+                switch inferenceDecision {
+                case .send(let audioRouteChurnNearEnd):
+                    recordDebugEvent(
+                        "segment_pipeline_ready",
+                        metadata: [
+                            "segmentId": persisted.id.uuidString,
+                            "durationSec": String(format: "%.2f", elapsed),
+                            "frameCount": "\(persisted.frameCount)",
+                            "audioRouteChurnNearEnd": audioRouteChurnNearEnd ? "true" : "false"
+                        ]
+                        .merging(gateTimingMetadata, uniquingKeysWith: { _, new in new })
+                        .merging(heuristicMetadata, uniquingKeysWith: { _, new in new })
+                    )
+                case .skip(let reason, let audioRouteChurnNearEnd):
+                    recordDebugEvent(
+                        "segment_pipeline_skipped",
+                        metadata: [
+                            "reason": reason,
+                            "segmentId": persisted.id.uuidString,
+                            "durationSec": String(format: "%.2f", elapsed),
+                            "frameCount": "\(persisted.frameCount)",
+                            "audioRouteChurnNearEnd": audioRouteChurnNearEnd ? "true" : "false"
+                        ]
+                        .merging(gateTimingMetadata, uniquingKeysWith: { _, new in new })
+                        .merging(heuristicMetadata, uniquingKeysWith: { _, new in new })
+                    )
+                    return
+                }
+
                 do {
                     let inference = try await pipeline.processVideoSegment(
                         manifestURL: persisted.manifestURL,
@@ -867,7 +967,14 @@ final class WearablesManager: ObservableObject {
                             "source": "mwdat_segment",
                             "segmentId": persisted.id.uuidString,
                             "frameCount": "\(persisted.frameCount)",
-                            "durationSec": String(format: "%.2f", elapsed)
+                            "durationSec": String(format: "%.2f", elapsed),
+                            "audioRouteChurnNearEnd": {
+                                if case .send(let audioRouteChurnNearEnd) = inferenceDecision {
+                                    return audioRouteChurnNearEnd ? "true" : "false"
+                                }
+                                return "false"
+                            }(),
+                            "mediaSentToInference": audioMetadata.transcript?.isEmpty == false ? "frames_transcript" : "frames"
                         ]
                     )
                     lastError = nil
@@ -875,8 +982,10 @@ final class WearablesManager: ObservableObject {
                         "segment_pipeline_success",
                         metadata: [
                             "segmentId": persisted.id.uuidString,
-                            "captureType": "shortVideo"
-                        ]
+                            "captureType": "shortVideo",
+                            "label": inference.label.rawValue,
+                            "modelVersion": inference.modelVersion
+                        ].merging(requestTimingMetadata(from: await pipeline.requestGateSnapshot()), uniquingKeysWith: { _, new in new })
                     )
                     announceActivityLogged(inference: inference)
                 } catch {
@@ -886,7 +995,7 @@ final class WearablesManager: ObservableObject {
                         metadata: [
                             "segmentId": persisted.id.uuidString,
                             "error": error.localizedDescription
-                        ]
+                        ].merging(requestTimingMetadata(from: await pipeline.requestGateSnapshot()), uniquingKeysWith: { _, new in new })
                     )
                 }
             } catch {
@@ -921,7 +1030,11 @@ final class WearablesManager: ObservableObject {
             let route = try audioRecorder.startSegment(segmentID: segmentID)
             recordDebugEvent(
                 "audio_start",
-                metadata: ["segmentId": segmentID.uuidString, "route": route]
+                metadata: [
+                    "segmentId": segmentID.uuidString,
+                    "route": route,
+                    "speechRecognizerAvailable": speechRecognizer?.isAvailable == true ? "true" : "false"
+                ]
             )
         } catch {
             recordDebugEvent(
@@ -931,12 +1044,28 @@ final class WearablesManager: ObservableObject {
         }
     }
 
-    private func finalizeAudioCapture(for segmentID: UUID) -> SegmentAudioMetadata {
-        let metadata = audioRecorder.stopSegment(segmentID: segmentID)
+    private func finalizeAudioCapture(for segmentID: UUID) async -> SegmentAudioMetadata {
+        var metadata = audioRecorder.stopSegment(segmentID: segmentID)
+        var transcriptionStatus = "not_attempted"
+        var transcriptionReason = metadata.included ? "pending" : metadata.status
+        if metadata.included,
+           let audioURL = metadata.localFileURL,
+           let transcriptionResult = await transcribeSegmentAudioIfPossible(audioURL: audioURL) {
+            transcriptionStatus = transcriptionResult.status
+            transcriptionReason = transcriptionResult.reason
+            if let transcript = transcriptionResult.transcript, !transcript.isEmpty {
+                metadata = metadata.withTranscript(transcript)
+            }
+        } else if !metadata.included {
+            transcriptionStatus = "skipped"
+        }
+
         var eventMetadata: [String: String] = [
             "segmentId": segmentID.uuidString,
             "status": metadata.status,
-            "included": metadata.included ? "true" : "false"
+            "included": metadata.included ? "true" : "false",
+            "transcriptionStatus": transcriptionStatus,
+            "transcriptionReason": transcriptionReason
         ]
         if let durationMillis = metadata.durationMillis {
             eventMetadata["durationMs"] = "\(durationMillis)"
@@ -944,8 +1073,135 @@ final class WearablesManager: ObservableObject {
         if let bytes = metadata.bytes {
             eventMetadata["bytes"] = "\(bytes)"
         }
+        if let transcript = metadata.transcript {
+            eventMetadata["transcriptChars"] = "\(transcript.count)"
+        }
+        if !metadata.note.isEmpty {
+            eventMetadata["note"] = metadata.note
+        }
         recordDebugEvent("audio_stop", metadata: eventMetadata)
         return metadata
+    }
+
+    private func requestTimingMetadata(from snapshot: InferenceRequestGateSnapshot) -> [String: String] {
+        var metadata: [String: String] = [
+            "requestGateRunning": snapshot.isRunning ? "true" : "false",
+            "secondsUntilNextGeminiAllowed": String(format: "%.2f", snapshot.secondsUntilNextAvailable())
+        ]
+        if let secondsSinceLastSuccess = snapshot.secondsSinceLastSuccess() {
+            metadata["secondsSinceLastGeminiSuccess"] = String(format: "%.2f", secondsSinceLastSuccess)
+        } else {
+            metadata["secondsSinceLastGeminiSuccess"] = "<none>"
+        }
+        return metadata
+    }
+
+    private func segmentInferenceDecision(
+        frameCount: Int,
+        duration: TimeInterval,
+        endedAt: Date
+    ) -> SegmentInferenceDecision {
+        let audioRouteChurnNearEnd = lastAudioRouteChangeAt.map {
+            abs(endedAt.timeIntervalSince($0)) <= SegmentInferencePolicy.audioRouteChurnWindow
+        } ?? false
+
+        if let lastControlAt = lastAppInitiatedSessionControlAt,
+           abs(endedAt.timeIntervalSince(lastControlAt)) <= SegmentInferencePolicy.startupShutdownWindow {
+            return .skip(reason: "startup_shutdown", audioRouteChurnNearEnd: audioRouteChurnNearEnd)
+        }
+
+        if duration < SegmentInferencePolicy.minimumDuration {
+            return .skip(reason: "too_short", audioRouteChurnNearEnd: audioRouteChurnNearEnd)
+        }
+
+        if frameCount < SegmentInferencePolicy.minimumFrameCount {
+            return .skip(reason: "too_few_frames", audioRouteChurnNearEnd: audioRouteChurnNearEnd)
+        }
+
+        if audioRouteChurnNearEnd,
+           duration < SegmentInferencePolicy.routeChurnBorderlineDuration,
+           frameCount < SegmentInferencePolicy.routeChurnBorderlineFrameCount {
+            return .skip(reason: "borderline_with_audio_route_churn", audioRouteChurnNearEnd: true)
+        }
+
+        return .send(audioRouteChurnNearEnd: audioRouteChurnNearEnd)
+    }
+
+    private func localHeuristicMetadata(from snapshot: LocalTranscriptHeuristicSnapshot) -> [String: String] {
+        [
+            "transcriptPresent": snapshot.transcriptPresent ? "true" : "false",
+            "transcriptMeaningful": snapshot.transcriptMeaningful ? "true" : "false",
+            "localHeuristicMatchedLabels": snapshot.matchedLabels.map(\.rawValue).joined(separator: ",").isEmpty
+                ? "<none>"
+                : snapshot.matchedLabels.map(\.rawValue).joined(separator: ","),
+            "localHeuristicSelectedLabel": snapshot.selectedLabel?.rawValue ?? "<none>",
+            "localHeuristicFeedingAmountOz": snapshot.feedingAmountOz.map { String(format: "%.1f", $0) } ?? "<none>",
+            "localHeuristicTimeExpressionDetected": snapshot.timeExpressionDetected ? "true" : "false",
+            "localHeuristicTimeExpressionResolved": snapshot.timeExpressionResolved ? "true" : "false",
+            "localHeuristicMentionedEventTime24h": snapshot.mentionedEventTime.flatMap {
+                guard let hour = $0.hour, let minute = $0.minute else { return nil }
+                return String(format: "%02d:%02d", hour, minute)
+            } ?? "<none>",
+            "localHeuristicMentionedEventDayOffset": snapshot.mentionedEventTime.map { "\($0.dayOffset)" } ?? "<none>"
+        ]
+    }
+
+    private func transcribeSegmentAudioIfPossible(audioURL: URL) async -> (transcript: String?, status: String, reason: String)? {
+        guard let speechRecognizer else {
+            recordDebugEvent("audio_transcript_skipped", metadata: ["reason": "speech_recognizer_missing"])
+            return (nil, "skipped", "speech_recognizer_missing")
+        }
+        guard speechRecognizer.isAvailable else {
+            recordDebugEvent("audio_transcript_skipped", metadata: ["reason": "speech_recognizer_unavailable"])
+            return (nil, "skipped", "speech_recognizer_unavailable")
+        }
+        guard Bundle.main.object(forInfoDictionaryKey: "NSSpeechRecognitionUsageDescription") != nil else {
+            recordDebugEvent("audio_transcript_skipped", metadata: ["reason": "missing_speech_usage_description"])
+            return (nil, "skipped", "missing_speech_usage_description")
+        }
+        guard await requestSpeechRecognitionPermissionIfNeeded() else {
+            recordDebugEvent("audio_transcript_skipped", metadata: ["reason": "speech_permission_denied"])
+            return (nil, "skipped", "speech_permission_denied")
+        }
+
+        let transcript = await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+            let request = SFSpeechURLRecognitionRequest(url: audioURL)
+            request.shouldReportPartialResults = false
+            request.taskHint = .dictation
+
+            let resumeGate = SingleResumeGate()
+            let task = speechRecognizer.recognitionTask(with: request) { result, error in
+                if let result, result.isFinal {
+                    if resumeGate.claim() {
+                        continuation.resume(returning: result.bestTranscription.formattedString)
+                    }
+                    return
+                }
+                if error != nil {
+                    if resumeGate.claim() {
+                        continuation.resume(returning: nil)
+                    }
+                }
+            }
+
+            Task {
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                if resumeGate.claim() {
+                    task.cancel()
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+
+        let normalized = transcript?
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        if let normalized, !normalized.isEmpty {
+            recordDebugEvent("audio_transcript_success", metadata: ["chars": "\(normalized.count)"])
+            return (normalized, "success", "transcribed")
+        }
+
+        recordDebugEvent("audio_transcript_skipped", metadata: ["reason": "empty_transcript"])
+        return (nil, "skipped", "empty_transcript")
     }
 
     private func recordDebugEvent(
@@ -1076,6 +1332,26 @@ final class WearablesManager: ObservableObject {
             metadata[key] = value
         }
         return metadata
+    }
+
+    private func audioRouteChangeMetadata(from notification: Notification) -> [String: String] {
+        let reasonValue = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+        let reason = reasonValue
+            .flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
+            .map(String.init(describing:)) ?? "<unknown>"
+        let session = AVAudioSession.sharedInstance()
+        let inputs = session.currentRoute.inputs
+            .map { "\($0.portType.rawValue):\($0.portName)" }
+            .joined(separator: ",")
+        let outputs = session.currentRoute.outputs
+            .map { "\($0.portType.rawValue):\($0.portName)" }
+            .joined(separator: ",")
+
+        return [
+            "reason": reason,
+            "inputs": inputs.isEmpty ? "<none>" : inputs,
+            "outputs": outputs.isEmpty ? "<none>" : outputs
+        ]
     }
 
     private func preferredDeviceIdentifier() -> DeviceIdentifier? {

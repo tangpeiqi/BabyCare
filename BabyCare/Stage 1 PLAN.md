@@ -140,3 +140,38 @@ Stage 0 proves end-to-end feasibility and physical-button behavior. Stage 1 prod
 4. DAT SDK docs in `/Users/peiqitang/Documents/GitHub/BabyTracker/PoL/SDK docs.md` are source of truth for current integration surface.
 5. If physical capture button is not directly exposable as an app callback, app-triggered capture remains canonical and architecture stays unchanged.
 6. Pause/resume transition signals from DAT are treated as capture boundaries for segment extraction.
+
+
+
+
+------
+Decision Tree
+
+If transcript exists and has meaningful content
+run local heuristic classifier
+if high confidence -> save locally, skip Gemini
+else -> send transcript-only to Gemini
+
+If transcript-only Gemini returns high confidence
+save result
+stop
+
+If transcript-only Gemini returns low confidence / other / failure
+build a 4-frame collage
+send image-only Gemini request
+
+If no meaningful transcript
+skip text path
+go directly to image-only collage
+
+
+
+-----
+If we want the smallest implementation slice first
+I’d phase it like this:
+
+Local transcript heuristic
+Transcript-only Gemini path
+Image-only path
+Collage instead of multiple frames
+That way we can validate each step without a huge rewrite.
