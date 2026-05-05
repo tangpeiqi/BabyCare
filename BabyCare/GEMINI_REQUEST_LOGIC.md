@@ -242,6 +242,10 @@ Current explicit phrase families include:
   - `wet diaper`
   - `diaper was wet`
   - `diaper is wet`
+  - `changed wet diaper`
+  - `changed the wet diaper`
+  - `changed a wet diaper`
+  - `diaper change wet`
 
 - bowel diaper:
   - `poop`
@@ -249,6 +253,13 @@ Current explicit phrase families include:
   - `poopy diaper`
   - `bowel movement`
   - `dirty diaper`
+  - `changed poopy diaper`
+  - `changed dirty diaper`
+  - `changed the poopy diaper`
+  - `changed the dirty diaper`
+  - `diaper change poop`
+  - `diaper change poopy`
+  - `diaper change dirty`
 
 - feeding:
   - `fed`
@@ -284,6 +295,8 @@ The heuristic also defers to Gemini if:
 - it finds a single activity label, but
 - it also detects time-related language, and
 - it cannot confidently resolve that time locally
+
+Generic diaper-change wording such as `diaper change` or `changed the diaper` does not produce a local label by itself. The local heuristic only maps diaper-change phrasing when the transcript also makes the outcome explicit, such as wet or bowel/dirty.
 
 This prevents phrases like `half an hour ago` or `7:30 PM today` from being saved as "now" when local parsing is incomplete.
 

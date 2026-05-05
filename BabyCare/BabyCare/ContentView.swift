@@ -11,7 +11,8 @@ import UIKit
 
 private enum AppTextRole {
     case body
-    case bodyEmphasis
+    case bodyBold
+    case emphasis
     case supporting
     case micro
 
@@ -19,8 +20,10 @@ private enum AppTextRole {
         switch self {
         case .body:
             return .system(size: 16, weight: .regular)
-        case .bodyEmphasis:
+        case .bodyBold:
             return .system(size: 16, weight: .semibold)
+        case .emphasis:
+            return .system(size: 36, weight: .bold)
         case .supporting:
             return .system(size: 12, weight: .regular)
         case .micro:
@@ -42,10 +45,19 @@ private extension Color {
         let blue = Double(rgbHex & 0xFF) / 255
         self.init(red: red, green: green, blue: blue)
     }
+
+    static let appDiaperEvent = Color(rgbHex: 0x00BA6C)
+    static let appSleepEvent = Color(rgbHex: 0x4992FF)
+    static let appFeedingEvent = Color(rgbHex: 0xAF5EFF)
+    static let appRecording = Color(rgbHex: 0xEE5A5A)
+    static let appDefaultText = Color(rgbHex: 0x351600)
+    static let appSecondaryText = Color(rgbHex: 0x72675C)
+    static let appDefaultCTA = Color(rgbHex: 0xE35F00)
+    static let appNonInteractive = Color(rgbHex: 0xF2E5DA)
 }
 
 struct ContentView: View {
-    private let bottomNavigationReservedHeight: CGFloat = 144
+    private let bottomNavigationReservedHeight: CGFloat = 168
 
     private enum AppTab: Hashable {
         case summary
@@ -91,9 +103,6 @@ struct ContentView: View {
     @State private var activityTypeDraft: ActivityLabel = .feeding
     @State private var timeDraft: Date = .now
     @State private var timelineActionError: String?
-    @State private var isFeedingGraphEnabled = true
-    @State private var isDiaperGraphEnabled = true
-    @State private var isSleepGraphEnabled = true
     @State private var settingsDestination: SettingsDestination?
     @State private var activeTimelineSwipeEventID: UUID?
     @Namespace private var bottomTabSelectionNamespace
@@ -315,7 +324,7 @@ struct ContentView: View {
                                 if visibleEvents.isEmpty {
                                     Text("No activity events yet. End a segment to create one.")
                                         .appText(.body)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(Color.appSecondaryText)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .padding(.top, 12)
                                 } else {
@@ -653,7 +662,7 @@ struct ContentView: View {
             Spacer(minLength: 0)
             Text(value)
                 .appText(.body)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appSecondaryText)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
@@ -668,7 +677,7 @@ struct ContentView: View {
                 .appText(.body)
             Text(value)
                 .appText(.supporting)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appSecondaryText)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -692,56 +701,53 @@ struct ContentView: View {
             guard let latestWakeUpTimestamp else { return true }
             return latestSleepStartTimestamp > latestWakeUpTimestamp
         }()
-        let thirdRowTitle = isCurrentlyAsleep ? "Asleep" : "Awake"
+        let thirdRowTitle = isCurrentlyAsleep ? "Asleep for" : "Awake for"
         let thirdRowTimestamp = isCurrentlyAsleep ? latestSleepStartTimestamp : latestWakeUpTimestamp
 
         let diaperTitle: String = {
             guard let latestDiaperEvent else { return "Diaper Change" }
             switch resolvedDiaperChangeValue(for: latestDiaperEvent) {
             case .wet:
-                return "Diaper Change (Wet)"
+                return "Diaper Change\n(Wet)"
             case .bm:
-                return "Diaper Change (BM)"
+                return "Diaper Change\n(BM)"
             case .dry:
-                return "Diaper Change (Dry)"
+                return "Diaper Change\n(Dry)"
             }
         }()
 
-        return ZStack {
-            RoundedRectangle(cornerRadius: 24)
-                .fill(.white)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24)
-                        .strokeBorder(Color.black.opacity(0.06), lineWidth: 1)
-                )
-
-            VStack(alignment: .leading, spacing: 16) {
-                summaryElapsedTimeRow(
-                    title: "Last Feeding",
-                    titleColor: Color(red: 0.52, green: 0.18, blue: 0.56),
-                    timeColor: Color(red: 0.52, green: 0.18, blue: 0.56),
+        return HStack(alignment: .top, spacing: 16) {
+            VStack(spacing: 16) {
+                summaryLastSinceTile(
+                    title: "Feeding",
+                    titleColor: .appFeedingEvent,
+                    timeColor: .appFeedingEvent,
                     mode: .ago,
-                    timestamp: latestActivityTimestamp(in: visibleEvents) { $0.label == .feeding }
+                    timestamp: latestActivityTimestamp(in: visibleEvents) { $0.label == .feeding },
+                    height: 112
                 )
-                summaryCardDivider
-                summaryElapsedTimeRow(
-                    title: diaperTitle,
-                    titleColor: Color(red: 0.53, green: 0.46, blue: 0.03),
-                    timeColor: Color(red: 0.53, green: 0.46, blue: 0.03),
-                    mode: .ago,
-                    timestamp: latestDiaperEvent?.timestamp
-                )
-                summaryCardDivider
-                summaryElapsedTimeRow(
+                summaryLastSinceTile(
                     title: thirdRowTitle,
-                    titleColor: Color(red: 0.00, green: 0.47, blue: 0.62),
-                    timeColor: Color(red: 0.00, green: 0.47, blue: 0.62),
+                    titleColor: .appSleepEvent,
+                    timeColor: .appSleepEvent,
                     mode: .forNow,
-                    timestamp: thirdRowTimestamp
+                    timestamp: thirdRowTimestamp,
+                    height: 112
                 )
             }
-            .padding(16)
+            .frame(maxWidth: .infinity)
+
+            summaryLastSinceTile(
+                title: diaperTitle,
+                titleColor: .appDiaperEvent,
+                timeColor: .appDiaperEvent,
+                mode: .ago,
+                timestamp: latestDiaperEvent?.timestamp,
+                height: 240
+            )
+            .frame(maxWidth: .infinity)
         }
+        .frame(height: 240)
     }
 
     private enum SummaryElapsedRowMode {
@@ -763,38 +769,11 @@ struct ContentView: View {
         let sleepIntervals = resolvedSleepIntervals(from: visibleEvents)
 
         return widgetCard {
-            VStack(alignment: .leading, spacing: 14) {
-                summaryActivityGraph(
-                    dayGroups: dayGroups,
-                    events: visibleEvents,
-                    sleepIntervals: sleepIntervals
-                )
-
-                VStack(spacing: 14) {
-                    summaryGraphToggleRow(
-                        title: "Feeding",
-                        color: Color(red: 0.52, green: 0.18, blue: 0.56),
-                        isOn: isFeedingGraphEnabled
-                    ) {
-                        isFeedingGraphEnabled.toggle()
-                    }
-                    summaryGraphToggleRow(
-                        title: "Diaper",
-                        color: Color(red: 0.53, green: 0.46, blue: 0.03),
-                        isOn: isDiaperGraphEnabled
-                    ) {
-                        isDiaperGraphEnabled.toggle()
-                    }
-                    summaryGraphToggleRow(
-                        title: "Sleep",
-                        color: Color(red: 0.00, green: 0.47, blue: 0.62),
-                        isOn: isSleepGraphEnabled
-                    ) {
-                        isSleepGraphEnabled.toggle()
-                    }
-                }
-                .padding(.top, 2)
-            }
+            summaryActivityGraph(
+                dayGroups: dayGroups,
+                events: visibleEvents,
+                sleepIntervals: sleepIntervals
+            )
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
@@ -825,13 +804,10 @@ struct ContentView: View {
         let contentWidth = CGFloat(orderedDayGroups.count) * dayColumnWidth
             + CGFloat(max(orderedDayGroups.count - 1, 0)) * daySpacing
         let filteredEvents = events.filter { event in
-            if event.label == .feeding {
-                return isFeedingGraphEnabled
-            }
-            if event.label == .diaperWet || event.label == .diaperBowel || event.diaperChangeValue != nil {
-                return isDiaperGraphEnabled
-            }
-            return false
+            event.label == .feeding
+            || event.label == .diaperWet
+            || event.label == .diaperBowel
+            || event.diaperChangeValue != nil
         }
 
         return HStack(alignment: .top, spacing: 8) {
@@ -864,7 +840,7 @@ struct ContentView: View {
                         ZStack(alignment: .topLeading) {
                             ForEach(summaryGraphTimeMarkers, id: \.hour) { marker in
                                 Rectangle()
-                                    .fill(Color.black.opacity(0.12))
+                                    .fill(Color.appNonInteractive)
                                     .frame(width: contentWidth, height: 1)
                                     .offset(y: yPosition(forHour: marker.hour, chartHeight: chartHeight))
                             }
@@ -911,16 +887,16 @@ struct ContentView: View {
         let isToday = Calendar.current.isDateInToday(day)
         return ZStack {
             Circle()
-                .fill(isToday ? .white : Color(red: 0.93, green: 0.93, blue: 0.93))
+                .fill(isToday ? .white : Color.appNonInteractive)
                 .overlay {
                     if isToday {
                         Circle()
-                            .strokeBorder(Color.black.opacity(0.12), lineWidth: 1)
+                            .strokeBorder(Color.appNonInteractive, lineWidth: 1)
                     }
                 }
             Text(weekdayLetter(for: day))
                 .appText(.body)
-                .foregroundStyle(.black)
+                .foregroundStyle(Color.appDefaultText)
         }
         .frame(width: 48, height: 48)
     }
@@ -953,81 +929,39 @@ struct ContentView: View {
         }
 
         return ZStack(alignment: .topLeading) {
-            if isFeedingGraphEnabled {
-                ForEach(feedingEvents, id: \.id) { event in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color(red: 0.52, green: 0.18, blue: 0.56))
-                        .frame(width: width, height: 4)
-                        .offset(x: 0, y: yPosition(for: event.timestamp, in: visualWindow.start, chartHeight: height) - 2)
-                }
+            ForEach(feedingEvents, id: \.id) { event in
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.appFeedingEvent)
+                    .frame(width: width, height: 4)
+                    .offset(x: 0, y: yPosition(for: event.timestamp, in: visualWindow.start, chartHeight: height) - 2)
             }
 
-            if isDiaperGraphEnabled {
-                ForEach(diaperEvents, id: \.id) { event in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color(red: 0.53, green: 0.46, blue: 0.03))
-                        .frame(width: width, height: 4)
-                        .offset(x: 0, y: yPosition(for: event.timestamp, in: visualWindow.start, chartHeight: height) - 2)
-                }
+            ForEach(diaperEvents, id: \.id) { event in
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.appDiaperEvent)
+                    .frame(width: width, height: 4)
+                    .offset(x: 0, y: yPosition(for: event.timestamp, in: visualWindow.start, chartHeight: height) - 2)
             }
 
-            if isSleepGraphEnabled {
-                ForEach(Array(daySleepSegments.enumerated()), id: \.offset) { _, segment in
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color(red: 0.00, green: 0.47, blue: 0.62))
-                        .frame(
-                            width: width,
-                            height: max(
-                                8,
-                                yPosition(for: segment.end, in: visualWindow.start, chartHeight: height)
-                                - yPosition(for: segment.start, in: visualWindow.start, chartHeight: height)
-                            )
+            ForEach(Array(daySleepSegments.enumerated()), id: \.offset) { _, segment in
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.appSleepEvent)
+                    .frame(
+                        width: width,
+                        height: max(
+                            8,
+                            yPosition(for: segment.end, in: visualWindow.start, chartHeight: height)
+                            - yPosition(for: segment.start, in: visualWindow.start, chartHeight: height)
                         )
-                        .offset(
-                            x: 0,
-                            y: yPosition(for: segment.start, in: visualWindow.start, chartHeight: height)
-                        )
-                }
+                    )
+                    .offset(
+                        x: 0,
+                        y: yPosition(for: segment.start, in: visualWindow.start, chartHeight: height)
+                    )
             }
         }
         .frame(width: width, height: height, alignment: .topLeading)
         .clipped()
-    }
-
-    @ViewBuilder
-    private func summaryGraphToggleRow(
-        title: String,
-        color: Color,
-        isOn: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Text(title)
-                    .appText(.body)
-                    .foregroundStyle(color)
-
-                Spacer(minLength: 12)
-
-                ZStack(alignment: isOn ? .trailing : .leading) {
-                    Capsule()
-                        .fill(isOn ? color : .white)
-                        .frame(width: 52, height: 30)
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(color, lineWidth: 2)
-                        )
-
-                    Circle()
-                        .fill(.white)
-                        .frame(width: 26, height: 26)
-                        .padding(2)
-                        .shadow(color: .black.opacity(0.08), radius: 1, y: 1)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .buttonStyle(.plain)
     }
 
     private func summaryGraphDayGroups(from events: [ActivityEventRecord]) -> [SummaryGraphDayGroup] {
@@ -1110,23 +1044,104 @@ struct ContentView: View {
         if label == "Noon" {
             Text(label)
                 .appText(.supporting)
-                .foregroundStyle(.black)
+                .foregroundStyle(Color.appDefaultText)
         } else {
             let parts = label.split(separator: " ")
             if let hour = parts.first, let meridiem = parts.last {
                 let hourText = Text(String(hour))
                     .appText(.supporting)
-                    .foregroundStyle(.black)
+                    .foregroundStyle(Color.appDefaultText)
                 let meridiemText = Text(String(meridiem))
                     .appText(.micro)
-                    .foregroundStyle(Color(red: 0.36, green: 0.36, blue: 0.36))
+                    .foregroundStyle(Color.appSecondaryText)
                 Text("\(hourText) \(meridiemText)")
             } else {
                 Text(label)
                     .appText(.supporting)
-                    .foregroundStyle(.black)
+                    .foregroundStyle(Color.appDefaultText)
             }
         }
+    }
+
+    @ViewBuilder
+    private func summaryLastSinceTile(
+        title: String,
+        titleColor: Color,
+        timeColor: Color,
+        mode: SummaryElapsedRowMode,
+        timestamp: Date?,
+        height: CGFloat
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .appText(.body)
+                .foregroundStyle(titleColor)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+
+            summaryLastSinceValueText(
+                timestamp: timestamp,
+                timeColor: timeColor,
+                mode: mode
+            )
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .strokeBorder(Color.appNonInteractive, lineWidth: 1)
+                )
+        }
+    }
+
+    private func summaryLastSinceValueText(
+        timestamp: Date?,
+        timeColor: Color,
+        mode: SummaryElapsedRowMode
+    ) -> Text {
+        guard let timestamp else {
+            return Text("No record")
+                .appText(.body)
+                .foregroundStyle(Color.appSecondaryText)
+        }
+
+        let elapsedTime = elapsedTimeComponents(since: timestamp)
+        let elapsedSeconds = elapsedTimeInterval(since: timestamp)
+        let hourValueText = Text(elapsedTime.hours)
+            .appText(.emphasis)
+            .foregroundStyle(timeColor)
+        let hourUnitText = Text("h")
+            .appText(.body)
+            .foregroundStyle(Color.appSecondaryText)
+        let minuteValueText = Text(elapsedTime.minutes)
+            .appText(.emphasis)
+            .foregroundStyle(timeColor)
+        let minuteUnitText = Text("m")
+            .appText(.body)
+            .foregroundStyle(Color.appSecondaryText)
+        let agoText = Text(" ago")
+            .appText(.body)
+            .foregroundStyle(Color.appSecondaryText)
+
+        if elapsedSeconds > 86_400 {
+            let dayValueText = Text("1")
+                .appText(.emphasis)
+                .foregroundStyle(timeColor)
+            let dayUnitText = Text("d+")
+                .appText(.body)
+                .foregroundStyle(Color.appSecondaryText)
+            return mode == .ago ? Text("\(dayValueText)\(dayUnitText)\(agoText)") : Text("\(dayValueText)\(dayUnitText)")
+        }
+
+        let timeText = Text("\(hourValueText)\(hourUnitText)\(minuteValueText)\(minuteUnitText)")
+        return mode == .ago ? Text("\(timeText)\(agoText)") : timeText
     }
 
     @ViewBuilder
@@ -1153,7 +1168,7 @@ struct ContentView: View {
 
     private var summaryCardDivider: some View {
         Rectangle()
-            .fill(Color.black.opacity(0.10))
+            .fill(Color.appNonInteractive)
             .frame(height: 1)
     }
 
@@ -1172,20 +1187,20 @@ struct ContentView: View {
         guard let timestamp else {
             return Text("No record")
                 .appText(.body)
-                .foregroundStyle(.gray)
+                .foregroundStyle(Color.appSecondaryText)
         }
 
         let elapsedTime = elapsedTimeComponents(since: timestamp)
         let elapsedSeconds = elapsedTimeInterval(since: timestamp)
         let prefixText = Text("for")
             .appText(.body)
-            .foregroundStyle(Color(red: 0.36, green: 0.36, blue: 0.36))
+            .foregroundStyle(Color.appSecondaryText)
         let suffixAgoText = Text(" ago")
             .appText(.body)
-            .foregroundStyle(Color(red: 0.36, green: 0.36, blue: 0.36))
+            .foregroundStyle(Color.appSecondaryText)
         let suffixNowText = Text(" now")
             .appText(.body)
-            .foregroundStyle(Color(red: 0.36, green: 0.36, blue: 0.36))
+            .foregroundStyle(Color.appSecondaryText)
         let leadingSpace = Text(" ")
             .appText(.body)
             .foregroundStyle(.clear)
@@ -1194,21 +1209,21 @@ struct ContentView: View {
             .foregroundStyle(timeColor)
         let hourUnitText = Text("h")
             .appText(.supporting)
-            .foregroundStyle(Color(red: 0.36, green: 0.36, blue: 0.36))
+            .foregroundStyle(Color.appSecondaryText)
         let hourText = Text("\(hourValueText)\(hourUnitText)")
         let minuteValueText = Text(elapsedTime.minutes)
             .appText(.body)
             .foregroundStyle(timeColor)
         let minuteUnitText = Text("m")
             .appText(.supporting)
-            .foregroundStyle(Color(red: 0.36, green: 0.36, blue: 0.36))
+            .foregroundStyle(Color.appSecondaryText)
         let minuteText = Text("\(minuteValueText)\(minuteUnitText)")
         let moreThanOneDayValueText = Text("more than 1")
             .appText(.body)
             .foregroundStyle(timeColor)
         let dayUnitText = Text("d")
             .appText(.supporting)
-            .foregroundStyle(Color(red: 0.36, green: 0.36, blue: 0.36))
+            .foregroundStyle(Color.appSecondaryText)
         let moreThanOneDayText = Text("\(moreThanOneDayValueText)\(dayUnitText)")
 
         switch mode {
@@ -1246,12 +1261,12 @@ struct ContentView: View {
         Button(action: action) {
             HStack {
                 Text(title)
-                    .appText(.bodyEmphasis)
-                    .foregroundStyle(.primary)
+                    .appText(.bodyBold)
+                    .foregroundStyle(Color.appDefaultText)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.appSecondaryText)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -1291,7 +1306,7 @@ struct ContentView: View {
         case .firstPaused:
             return (
                 "Great! Tap on the glasses' touch pad when you want to log an activity, tap again to finish logging.",
-                Color(red: 0.25, green: 0.37, blue: 0.27),
+                Color.appDefaultText,
                 false
             )
         default:
@@ -1304,7 +1319,7 @@ struct ContentView: View {
     }
 
     private var activityTimelineDividerColor: Color {
-        Color(red: 0.95, green: 0.95, blue: 0.95)
+        Color.appNonInteractive
     }
 
     private func activityTimelineContainer(
@@ -1318,7 +1333,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(day.formatted(date: .abbreviated, time: .omitted))
                         .font(.headline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appSecondaryText)
                         .padding(.horizontal, 16)
 
                     VStack(spacing: 0) {
@@ -1362,7 +1377,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(event.timestamp.formatted(date: .omitted, time: .shortened))
                 .appText(.supporting)
-                .foregroundStyle(Color(red: 0.45, green: 0.45, blue: 0.45))
+                .foregroundStyle(Color.appSecondaryText)
                 .padding(.top, 16)
                 .padding(.horizontal, 16)
 
@@ -1376,7 +1391,7 @@ struct ContentView: View {
                         presentActivityEditor(for: event)
                     } label: {
                         Text(activityCardTitle(for: event))
-                            .appText(.bodyEmphasis)
+                            .appText(.bodyBold)
                             .foregroundStyle(accentColor)
                     }
                     .buttonStyle(.plain)
@@ -1387,7 +1402,7 @@ struct ContentView: View {
                        let valueAction = valueAction(for: event, mode: editorMode) {
                         Button(action: valueAction) {
                             Text(activityCardVariableText(for: event, mode: editorMode))
-                                .appText(.bodyEmphasis)
+                                .appText(.bodyBold)
                                 .foregroundStyle(accentColor)
                                 .multilineTextAlignment(.trailing)
                         }
@@ -1400,18 +1415,18 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(event.rationaleShort)
                     .appText(.supporting)
-                    .foregroundStyle(Color(red: 0.45, green: 0.45, blue: 0.45))
+                    .foregroundStyle(Color.appSecondaryText)
 
                 HStack(spacing: 8) {
                     Text("Confidence: \(event.confidence.formatted(.number.precision(.fractionLength(2))))")
                         .appText(.supporting)
-                        .foregroundStyle(Color(red: 0.45, green: 0.45, blue: 0.45))
+                        .foregroundStyle(Color.appSecondaryText)
                     if event.needsReview {
                         Text("Needs Review")
                             .appText(.supporting)
-                            .foregroundStyle(.black)
+                            .foregroundStyle(Color.appDefaultText)
                             .padding(.horizontal, 4)
-                            .background(Color(red: 0.82, green: 0.82, blue: 0.82))
+                            .background(Color.appNonInteractive)
                             .clipShape(RoundedRectangle(cornerRadius: 2))
                     }
                 }
@@ -1447,15 +1462,15 @@ struct ContentView: View {
 
     private func activityCardAccentColor(for event: ActivityEventRecord) -> Color {
         if event.label == .feeding {
-            return Color(red: 0.49, green: 0.15, blue: 0.50)
+            return .appFeedingEvent
         }
         if isDiaperEvent(event) {
-            return Color(red: 0.55, green: 0.47, blue: 0.02)
+            return .appDiaperEvent
         }
         if event.label == .sleepStart || event.label == .wakeUp {
-            return Color(red: 0.02, green: 0.47, blue: 0.55)
+            return .appSleepEvent
         }
-        return .black
+        return .appDefaultText
     }
 
     private func activityCardVariableText(for event: ActivityEventRecord, mode: ActivityValueEditor.Mode) -> String {
@@ -1800,12 +1815,10 @@ struct ContentView: View {
 
     @ViewBuilder
     private func registrationButton(isRegistered: Bool) -> some View {
-        let figmaTextColor = Color(red: 0.0, green: 0.25, blue: 0.35)
-        let lightBorderColor = Color(red: 0.945, green: 0.945, blue: 0.945)
         actionCardButton(
             title: isRegistered ? "Unregister your glasses" : "Register your glasses",
-            textColor: figmaTextColor,
-            borderColor: isRegistered ? lightBorderColor : figmaTextColor
+            textColor: isRegistered ? .appDefaultText : .appDefaultCTA,
+            borderColor: isRegistered ? .appNonInteractive : .appDefaultCTA
         ) {
             Task {
                 if isRegistered {
@@ -1839,7 +1852,7 @@ struct ContentView: View {
                     )
 
                 Text(title)
-                    .appText(.bodyEmphasis)
+                    .appText(.bodyBold)
                     .foregroundStyle(textColor)
             }
             .frame(maxWidth: .infinity)
@@ -1855,7 +1868,7 @@ struct ContentView: View {
                     .fill(.white)
                     .overlay(
                         RoundedRectangle(cornerRadius: 24)
-                            .strokeBorder(Color(red: 0.945, green: 0.945, blue: 0.945), lineWidth: 1)
+                            .strokeBorder(Color.appNonInteractive, lineWidth: 1)
                     )
             }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1962,8 +1975,8 @@ struct ContentView: View {
             }
         } label: {
             Text("Request camera permission")
-                .appText(.bodyEmphasis)
-                .foregroundStyle(Color(red: 0.0, green: 0.25, blue: 0.35))
+                .appText(.bodyBold)
+                .foregroundStyle(Color.appDefaultCTA)
                 .frame(maxWidth: .infinity)
                 .frame(height: 64)
                 .background(
@@ -1972,7 +1985,7 @@ struct ContentView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 30, style: .continuous)
-                        .stroke(Color(red: 0.0, green: 0.25, blue: 0.35), lineWidth: 1)
+                        .stroke(Color.appDefaultCTA, lineWidth: 1)
                 )
         }
         .buttonStyle(.plain)
@@ -1984,10 +1997,10 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Glasses Camera")
                     .appText(.body)
-                    .foregroundStyle(.black)
+                    .foregroundStyle(Color.appDefaultText)
                 Text(bottomCameraStatusText)
                     .appText(.body)
-                    .foregroundStyle(Color(red: 0.53, green: 0.53, blue: 0.53))
+                    .foregroundStyle(Color.appSecondaryText)
             }
 
             Spacer(minLength: 12)
@@ -2040,14 +2053,14 @@ struct ContentView: View {
                         .foregroundStyle(
                             isSelected
                             ? accentColor
-                            : .black.opacity(0.65)
+                            : Color.appDefaultCTA
                         )
                     Text(title)
                         .appText(.micro)
                         .foregroundStyle(
                             isSelected
                             ? accentColor
-                            : .black
+                            : Color.appDefaultCTA
                         )
                         .lineLimit(1)
                         .minimumScaleFactor(0.9)
@@ -2062,45 +2075,37 @@ struct ContentView: View {
     }
 
     private func bottomTabAccentColor(for tab: AppTab) -> Color {
-        switch tab {
-        case .summary:
-            return Color(red: 0.20, green: 0.69, blue: 0.62)
-        case .activities:
-            return Color(red: 0.90, green: 0.40, blue: 0.24)
-        case .settings:
-            return Color(red: 0.23, green: 0.36, blue: 0.82)
-        }
+        Color.appDefaultCTA
     }
 
     private func bottomTabAccentFill(for tab: AppTab) -> some ShapeStyle {
+        let palette = palette(for: tab)
+
         switch tab {
         case .summary:
             return LinearGradient(
                 colors: [
-                    Color(red: 0.95, green: 0.88, blue: 0.28),
-                    Color(red: 0.53, green: 0.83, blue: 0.34),
-                    Color(red: 0.20, green: 0.81, blue: 0.78)
-                ].map { $0.opacity(0.24) },
+                    palette.firstCircle.opacity(0.92),
+                    palette.secondCircle.opacity(0.98)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         case .activities:
             return LinearGradient(
                 colors: [
-                    Color(red: 0.90, green: 0.24, blue: 0.24),
-                    Color(red: 0.96, green: 0.54, blue: 0.22),
-                    Color(red: 0.97, green: 0.79, blue: 0.29)
-                ].map { $0.opacity(0.24) },
+                    palette.firstCircle.opacity(0.92),
+                    palette.secondCircle.opacity(0.98)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         case .settings:
             return LinearGradient(
                 colors: [
-                    Color(red: 0.07, green: 0.67, blue: 0.66),
-                    Color(red: 0.21, green: 0.45, blue: 0.86),
-                    Color(red: 0.46, green: 0.25, blue: 0.78)
-                ].map { $0.opacity(0.24) },
+                    palette.firstCircle.opacity(0.92),
+                    palette.secondCircle.opacity(0.98)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -2189,7 +2194,7 @@ private struct DebugLogsView: View {
                     Spacer()
                     Text(wearablesManager.buttonLikeEventDetected ? "detected" : "not detected")
                         .appText(.body)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appSecondaryText)
                 }
 
                 Button("Mark Manual Glasses Press") {
@@ -2205,7 +2210,7 @@ private struct DebugLogsView: View {
                 if wearablesManager.debugEvents.isEmpty {
                     Text("No wearable events logged yet.")
                         .appText(.body)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appSecondaryText)
                 } else {
                     ForEach(wearablesManager.debugEvents) { event in
                         VStack(alignment: .leading, spacing: 4) {
@@ -2230,12 +2235,12 @@ private struct DebugLogsView: View {
                                 Spacer()
                                 Text(event.timestamp.formatted(date: .omitted, time: .standard))
                                     .appText(.supporting)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(Color.appSecondaryText)
                             }
                             if !event.metadata.isEmpty {
                                 Text(formatDebugMetadata(event.metadata))
                                     .appText(.supporting)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(Color.appSecondaryText)
                             }
                         }
                         .padding(.vertical, 2)

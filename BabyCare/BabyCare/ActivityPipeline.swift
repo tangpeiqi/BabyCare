@@ -325,13 +325,33 @@ private struct LocalTranscriptHeuristicClassifier {
         var labels: Set<ActivityLabel> = []
 
         if containsAnyPhrase(in: transcript, phrases: [
-            "wet diaper", "diaper was wet", "diaper is wet", "really wet", "super wet"
+            "wet diaper",
+            "diaper was wet",
+            "diaper is wet",
+            "really wet",
+            "super wet",
+            "changed wet diaper",
+            "changed the wet diaper",
+            "diaper change wet",
+            "changed a wet diaper"
         ]) {
             labels.insert(.diaperWet)
         }
 
         if containsAnyPhrase(in: transcript, phrases: [
-            "poop", "pooped", "poopy diaper", "bowel movement", "dirty diaper", "bm diaper"
+            "poop",
+            "pooped",
+            "poopy diaper",
+            "bowel movement",
+            "dirty diaper",
+            "bm diaper",
+            "changed poopy diaper",
+            "changed dirty diaper",
+            "changed the poopy diaper",
+            "changed the dirty diaper",
+            "diaper change poop",
+            "diaper change poopy",
+            "diaper change dirty"
         ]) {
             labels.insert(.diaperBowel)
         }
