@@ -6,7 +6,7 @@ _Baby activity logging made easy with an agent created for your AI glasses._
 
 I built a prototype agent that uses Ray-ban Meta glasses to get context(image and audio) about the baby activity, logs it to an activity timeline and shows insights overtime on your mobile phone.
 
-Traditionally: you would have to use a mobile app like huckleberry, or what to expect, to manually log everything into the app, from diaper change, poop color, sleep schedule to food consumption. You have to remind yourself to find time to log the activities afterwards. It creates cognitive pressure and takes precious time out of the already over-loaded new parents. 
+Traditionally: you would have to use a mobile app like Huckleberry, or What to Expect, to manually log everything into the app, from diaper change, sleep schedule to food consumption. It creates cognitive pressure and takes precious time out of the already over-loaded new parents. 
 
 With this agent: you can just tap on the RBM to capture some context (a few images of what you are doing or a few words from you) and have the AI agent figure out what to note down, then organize the info into easily consumable data for you. It takes all the manual work out of your plate so you can focus on what actually matters - taking care of the new born.
 <img width="1200" height="245" alt="Flow" src="https://github.com/user-attachments/assets/ab6c3ae0-62ef-4469-9cc2-6ad63eed7990" />
